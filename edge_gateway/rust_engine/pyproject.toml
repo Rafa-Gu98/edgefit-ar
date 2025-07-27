@@ -1,0 +1,10 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[tool.maturin]
+# 您的自定义配置，例如：
+cargo-options = ["--release"]
+bindings = "pyo3"
+strip = true
+module-name = "edge_gateway.rust_engine"

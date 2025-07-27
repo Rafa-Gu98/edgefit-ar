@@ -1,0 +1,83 @@
+# config/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: edgefit-gateway
+  labels:
+    app: edgefit-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: edgefit-gateway
+  template:
+    metadata:
+      labels:
+        app: edgefit-gateway
+    spec:
+      containers:
+      - name: edgefit-gateway
+        image: edgefit/gateway:latest
+        ports:
+        - containerPort: 8000
+        env:
+        - name: APP_CONFIG
+          value: "/app/config/app_config.yaml"
+        - name: MODEL_CONFIG
+          value: "/app/config/model_config.yaml"
+        volumeMounts:
+        - name: config-volume
+          mountPath: /app/config
+        - name: models-volume
+          mountPath: /app/models
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: config-volume
+        configMap:
+          name: edgefit-config
+      - name: models-volume
+        persistentVolumeClaim:
+          claimName: edgefit-models-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: edgefit-gateway-service
+spec:
+  selector:
+    app: edgefit-gateway
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 8000
+  type: LoadBalancer
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: edgefit-config
+data:
+  app_config.yaml: |
+    # App configuration content here
+  model_config.yaml: |
+    # Model configuration content here

@@ -1,0 +1,122 @@
+# config/app_config.yaml
+app:
+  name: "EdgeFit-AR"
+  version: "1.0.0"
+  debug: false
+  log_level: "INFO"
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  reload: false
+  workers: 1
+
+database:
+  type: "sqlite"
+  url: "sqlite:///./edgefit.db"
+  echo: false
+
+redis:
+  host: "localhost"
+  port: 6379
+  db: 0
+  password: null
+
+inference:
+  model_path: "./models"
+  batch_size: 1
+  max_sequence_length: 100
+  confidence_threshold: 0.7
+  
+sensors:
+  sample_rate: 50  # Hz
+  buffer_size: 1000
+  noise_threshold: 0.1
+  calibration_samples: 100
+
+health_monitoring:
+  heart_rate:
+    enable: true
+    min_value: 50
+    max_value: 200
+    alert_threshold: 180
+  
+  fatigue:
+    enable: true
+    max_score: 100
+    warning_threshold: 80
+    
+  recovery:
+    enable: true
+    calculation_window: 300  # seconds
+
+exercise_config:
+  supported_exercises:
+    - squat
+    - pushup  
+    - plank
+    - lunge
+    - jumping_jack
+  
+  rep_detection:
+    squat:
+      min_duration: 1.5  # seconds
+      max_duration: 8.0
+      acceleration_threshold: 2.0
+    
+    pushup:
+      min_duration: 1.0
+      max_duration: 6.0
+      acceleration_threshold: 1.5
+    
+    plank:
+      stability_threshold: 0.1
+      min_duration: 10.0
+    
+    lunge:
+      min_duration: 1.2
+      max_duration: 7.0
+      asymmetry_threshold: 0.3
+    
+    jumping_jack:
+      min_duration: 0.8
+      max_duration: 4.0
+      intensity_threshold: 3.0
+
+ar_interface:
+  websocket_timeout: 30
+  max_connections: 10
+  feedback_rate: 30  # FPS
+  
+  visual_feedback:
+    pose_indicator_size: 0.1
+    error_highlight_duration: 2.0
+    form_score_display: true
+    rep_counter_position: "top_right"
+  
+  audio_feedback:
+    enable: true
+    volume: 0.8
+    voice_language: "en-US"
+
+cloud_sync:
+  enable: false
+  endpoint: "https://api.edgefit.example.com"
+  api_key: "your_api_key_here"
+  sync_interval: 300  # seconds
+  batch_size: 100
+
+security:
+  cors:
+    allow_origins: ["*"]
+    allow_methods: ["GET", "POST", "PUT", "DELETE"]
+    allow_headers: ["*"]
+  
+  rate_limiting:
+    enable: true
+    requests_per_minute: 100
+    
+  authentication:
+    enable: false
+    jwt_secret: "your_jwt_secret_here"
+    token_expire_minutes: 1440

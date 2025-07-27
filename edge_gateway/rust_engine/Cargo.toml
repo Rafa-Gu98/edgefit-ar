@@ -1,0 +1,89 @@
+[package]
+name = "rust_engine"
+version = "0.1.0"
+edition = "2021"
+authors = ["Rafa_PyRs.dev"]
+description = "High-performance Rust engine for real-time fitness pose analysis"
+license = "MIT"
+
+[lib]
+name = "rust_engine"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Python绑定
+pyo3 = { version = "0.20", optional = true, features = ["extension-module", "abi3-py38"] }
+pythonize = "0.20"
+
+# 序列化
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# 机器学习和张量操作
+tch = { version = "0.14.0", features = ["download-libtorch"] }
+
+# 数学计算
+ndarray = "0.15"
+nalgebra = "0.32"
+
+# 并发处理
+tokio = { version = "1.0", features = ["full"] }
+rayon = "1.8"
+
+# 错误处理
+thiserror = "1.0"
+anyhow = "1.0"
+
+# 日志
+log = { version = "0.4", optional = true }
+env_logger = { version = "0.11.5", optional = true }
+
+# 时间处理
+chrono = { version = "0.4", features = ["serde"] }
+
+# 数据结构
+indexmap = "2.0"
+
+# 信号处理（用于频域分析）
+rustfft = "6.1"
+
+[dev-dependencies]
+# 测试依赖
+criterion = { version = "0.5", features = ["html_reports"] }
+proptest = "1.0"
+
+[features]
+default = ["python-bindings"]
+python-bindings = ["pyo3"]
+# gpu-acceleration = ["tch/cuda"]  # 移除或注释掉
+debug-logging = ["log", "env_logger"]
+
+[profile.release]
+# 优化配置 - 针对边缘设备
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.dev]
+# 开发配置
+opt-level = 0
+debug = true
+split-debuginfo = "unpacked"
+
+# 针对边缘设备的优化配置
+[profile.edge-release]
+inherits = "release"
+opt-level = "s"  # 优化大小而非速度
+lto = "fat"
+codegen-units = 1
+
+[package.metadata.maturin]
+# maturin Python打包配置
+python-source = "python"
+module-name = "edge_gateway.rust_engine"
+
+[build-dependencies]
+# 构建时依赖
+cc = "1.0"

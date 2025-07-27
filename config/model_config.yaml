@@ -1,0 +1,118 @@
+# config/model_config.yaml
+models:
+  exercise_classifier:
+    path: "exercise_classifier.pt" 
+    type: "pytorch_jit"
+    input_shape: [1, 100, 9]  # [batch, sequence, features]
+    output_classes: 5
+    quantized: true
+    
+    preprocessing:
+      normalization: true
+      window_size: 100
+      overlap: 50
+      
+    performance:
+      accuracy: 0.945
+      inference_time_ms: 2.1
+      memory_mb: 15
+  
+  pose_estimator:
+    path: "pose_estimator.pt"
+    type: "pytorch_jit" 
+    input_shape: [1, 3, 224, 224]  # [batch, channels, height, width]
+    output_keypoints: 17
+    quantized: true
+    
+    preprocessing:
+      resize: [224, 224]
+      normalize_mean: [0.485, 0.456, 0.406]
+      normalize_std: [0.229, 0.224, 0.225]
+      
+    performance:
+      accuracy: 0.928
+      inference_time_ms: 3.8
+      memory_mb: 8
+  
+  error_detector:
+    path: "error_detector.pt"
+    type: "pytorch_jit"
+    input_shape: [1, 51]  # [batch, features]
+    output_errors: 8
+    quantized: true
+    
+    error_types:
+      - knee_valgus
+      - forward_lean
+      - incomplete_range
+      - body_sag
+      - poor_alignment
+      - excessive_speed
+      - insufficient_depth
+      - asymmetric_movement
+    
+    performance:
+      precision: 0.892
+      recall: 0.876
+      inference_time_ms: 1.2
+      memory_mb: 5
+
+optimization:
+  quantization:
+    enable: true
+    type: "int8"
+    calibration_samples: 1000
+    
+  pruning:
+    enable: false
+    sparsity: 0.3
+    
+  tensorrt:
+    enable: false
+    precision: "fp16"
+    
+  onnx_runtime:
+    enable: false
+    providers: ["CPUExecutionProvider"]
+
+training:
+  datasets:
+    uci_har:
+      path: "./data_engine/datasets/raw/uci_har"
+      train_split: 0.7
+      val_split: 0.15
+      test_split: 0.15
+    
+    fit3d:
+      path: "./data_engine/datasets/raw/fit3d"
+      train_split: 0.8
+      val_split: 0.1
+      test_split: 0.1
+    
+    custom:
+      path: "./data_engine/datasets/raw/custom"
+      train_split: 0.7
+      val_split: 0.15
+      test_split: 0.15
+  
+  hyperparameters:
+    batch_size: 32
+    learning_rate: 0.001
+    epochs: 100
+    optimizer: "Adam"
+    scheduler: "CosineAnnealingLR"
+    
+  augmentation:
+    noise_injection: 0.01
+    time_warping: 0.2
+    rotation: 15  # degrees
+    scaling: [0.9, 1.1]
+    
+  early_stopping:
+    patience: 10
+    min_delta: 0.001
+    
+  checkpointing:
+    save_best: true
+    save_last: true
+    monitor: "val_accuracy"
