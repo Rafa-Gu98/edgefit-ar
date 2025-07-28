@@ -1,10 +1,9 @@
-use tch::{Tensor, Device, Kind, nn, nn::Module};
+use tch::{Tensor, Device, Kind, nn};
 use std::path::Path;
 use std::collections::HashMap;
 
 pub struct InferenceEngine {
-    exercise_classifier: nn::VarStore,
-    pose_estimator: nn::VarStore,
+    vs: nn::VarStore,
     device: Device,
     model: Box<dyn nn::Module>,
 }
@@ -13,33 +12,20 @@ impl InferenceEngine {
     pub fn new(model_path: &str) -> Result<Self, String> {
         let device = Device::cuda_if_available();
         
-        let mut exercise_classifier = nn::VarStore::new(device);
-        let mut pose_estimator = nn::VarStore::new(device);
+        // 创建一个VarStore用于模型参数
+        let mut vs = nn::VarStore::new(device);
         
         // 构建模型
-        let vs = nn::VarStore::new(device);
         let model = Self::build_model(&vs.root())?;
         
         // 尝试加载预训练模型权重
-        if Path::new(&format!("{}/exercise_classifier.pt", model_path)).exists() {
-            exercise_classifier.load(&format!("{}/exercise_classifier.pt", model_path))
-                .map_err(|e| format!("Failed to load exercise classifier: {}", e))?;
-        }
-        
-        if Path::new(&format!("{}/pose_estimator.pt", model_path)).exists() {
-            pose_estimator.load(&format!("{}/pose_estimator.pt", model_path))
-                .map_err(|e| format!("Failed to load pose estimator: {}", e))?;
-        }
-        
-        // 如果存在统一模型文件，也尝试加载
         if Path::new(model_path).exists() && model_path.ends_with(".pt") {
             vs.load(model_path)
                 .map_err(|e| format!("Failed to load model weights: {}", e))?;
         }
         
         Ok(InferenceEngine {
-            exercise_classifier,
-            pose_estimator,
+            vs,
             device,
             model: Box::new(model),
         })
@@ -50,7 +36,7 @@ impl InferenceEngine {
             return Err("Empty features".to_string());
         }
 
-        // 使用 from_slice 替代 of_slice，并正确处理错误
+        // 创建张量
         let input = Tensor::from_slice(features)
             .to_device(self.device)
             .unsqueeze(0); // 添加 batch 维度
@@ -100,10 +86,22 @@ impl InferenceEngine {
             pose_output.view([-1, 17, 3])
         });
 
-        // 将张量转换为Vec<f32>
-        let keypoints_flat: Vec<f32> = Vec::from(output.flatten(0, -1));
-        let mut result = Vec::new();
+        // 将张量转换为Vec<f32> - 修复转换问题
+        let output_cpu = output.to_device(Device::Cpu);
+        let mut keypoints_flat = Vec::new();
+        
+        // 手动提取数据
+        let size = output_cpu.size();
+        for i in 0..size[0] {
+            for j in 0..size[1] {
+                for k in 0..size[2] {
+                    let val: f64 = output_cpu.double_value(&[i, j, k]);
+                    keypoints_flat.push(val as f32);
+                }
+            }
+        }
 
+        let mut result = Vec::new();
         for chunk in keypoints_flat.chunks(3) {
             if chunk.len() == 3 {
                 result.push((chunk[0], chunk[1], chunk[2]));
@@ -114,7 +112,7 @@ impl InferenceEngine {
     }
 
     fn build_model(vs: &nn::Path) -> Result<impl nn::Module, String> {
-        // 构建神经网络模型
+        // 构建神经网络模型 - 移除不存在的dropout函数
         let input_size = 50; // 根据特征数量调整
         let hidden_size = 128;
         let num_classes = 5; // 支持的运动类型数量
@@ -122,10 +120,11 @@ impl InferenceEngine {
         let model = nn::seq()
             .add(nn::linear(vs / "layer1", input_size, hidden_size, Default::default()))
             .add_fn(|xs| xs.relu())
-            .add(nn::dropout(vs / "dropout1", 0.3, true))
+            // 使用函数式dropout替代nn::dropout
+            .add_fn(|xs| xs.dropout(0.3, true))
             .add(nn::linear(vs / "layer2", hidden_size, hidden_size, Default::default()))
             .add_fn(|xs| xs.relu())
-            .add(nn::dropout(vs / "dropout2", 0.3, true))
+            .add_fn(|xs| xs.dropout(0.3, true))
             .add(nn::linear(vs / "layer3", hidden_size, num_classes, Default::default()))
             .add_fn(|xs| xs.softmax(-1, Kind::Float));
         

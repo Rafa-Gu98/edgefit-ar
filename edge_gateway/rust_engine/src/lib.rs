@@ -72,35 +72,44 @@ impl EdgeFitEngine {
         })
     }
 
-    pub fn process_sensor_data(&mut self, py: Python, data: &PyList) -> PyResult<PyObject> {
-        // 转换Python数据到Rust结构
-        let sensor_data: Vec<SensorData> = data.iter()
-            .map(|item| {
-                let dict = item.downcast::<PyDict>()?;
-                Ok(SensorData {
-                    timestamp: dict.get_item("timestamp")?
-                        .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err("Missing 'timestamp'"))?
-                        .extract()?,
-                    accelerometer: dict.get_item("accelerometer")?
-                        .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err("Missing 'accelerometer'"))?
-                        .extract()?,
-                    gyroscope: dict.get_item("gyroscope")?
-                        .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err("Missing 'gyroscope'"))?
-                        .extract()?,
-                    magnetometer: dict.get_item("magnetometer")?
-                        .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err("Missing 'magnetometer'"))?
-                        .extract()?,
+    pub fn process_sensor_data(&mut self, data: &PyList) -> PyResult<PyObject> {
+        Python::with_gil(|py| {
+            // 转换Python数据到Rust结构
+            let sensor_data: Vec<SensorData> = data
+                .iter()
+                .map(|item| {
+                    let item = item?;
+                    let dict = item.downcast::<PyDict>()?;
+                    Ok(SensorData {
+                        timestamp: dict.get_item("timestamp")
+                            .and_then(|v| v.ok())
+                            .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err("Missing 'timestamp'"))?
+                            .extract()?,
+                        accelerometer: dict.get_item("accelerometer")
+                            .and_then(|v| v.ok())
+                            .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err("Missing 'accelerometer'"))?
+                            .extract()?,
+                        gyroscope: dict.get_item("gyroscope")
+                            .and_then(|v| v.ok())
+                            .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err("Missing 'gyroscope'"))?
+                            .extract()?,
+                        magnetometer: dict.get_item("magnetometer")
+                            .and_then(|v| v.ok())
+                            .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err("Missing 'magnetometer'"))?
+                            .extract()?,
+                    })
                 })
-            })
-            .collect::<PyResult<Vec<_>>>()?;
+                .collect::<PyResult<Vec<_>>>()?;
 
-        // 执行推理
-        let analysis = self.analyze_movement(&sensor_data)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
+            // 执行推理
+            let analysis = self.analyze_movement(&sensor_data)
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
 
-        // 转换结果回Python
-        pythonize::pythonize(py, &analysis)
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+            // 转换结果回Python对象
+            pythonize::pythonize(py, &analysis)
+                .map(|bound| bound.to_object(py))
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+        })
     }
 
     pub fn start_exercise_session(&mut self, exercise_type: String) -> PyResult<()> {
@@ -108,7 +117,7 @@ impl EdgeFitEngine {
         self.rep_count = 0;
         self.session_start = Some(std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("System time error: {}", e)))?
             .as_millis() as u64);
         Ok(())
     }
@@ -119,7 +128,7 @@ impl EdgeFitEngine {
         if let Some(start_time) = self.session_start {
             let duration = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("System time error: {}", e)))?
                 .as_millis() as u64 - start_time;
             
             session_summary.insert("duration_ms".to_string(), duration as f32);
@@ -154,25 +163,25 @@ impl EdgeFitEngine {
         Ok(self.inference_engine.get_model_info())
     }
 
-    pub fn evaluate_model(&self, py: Python, test_data: &PyList, test_labels: &PyList) -> PyResult<HashMap<String, f32>> {
-        // 转换测试数据
-        let features_batch: Vec<Vec<f32>> = test_data.iter()
-            .map(|item| -> PyResult<Vec<f32>> {
-                item.extract()
-            })
-            .collect::<PyResult<Vec<_>>>()?;
+    pub fn evaluate_model(&self, test_data: &PyList, test_labels: &PyList) -> PyResult<HashMap<String, f32>> {
+        Python::with_gil(|py| {
+            // 转换测试数据
+            let features_batch: Vec<Vec<f32>> = test_data
+                .iter()
+                .map(|item| item?.extract())
+                .collect::<PyResult<Vec<_>>>()?;
 
-        let labels: Vec<String> = test_labels.iter()
-            .map(|item| -> PyResult<String> {
-                item.extract()
-            })
-            .collect::<PyResult<Vec<_>>>()?;
+            let labels: Vec<String> = test_labels
+                .iter()
+                .map(|item| item?.extract())
+                .collect::<PyResult<Vec<_>>>()?;
 
-        // 执行评估
-        let metrics = self.inference_engine.evaluate_model(&features_batch, &labels)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
+            // 执行评估
+            let metrics = self.inference_engine.evaluate_model(&features_batch, &labels)
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
 
-        Ok(metrics)
+            Ok(metrics)
+        })
     }
 }
 
@@ -185,16 +194,14 @@ impl EdgeFitEngine {
 
         // 特征提取
         let features = features::extract_features(sensor_data)?;
-        
+
         // 运动分类
-        let inferred_type = self.inference_engine.classify_exercise(&features)?;
-        if inferred_type != exercise_type {
-            // 可选：记录不一致，但继续使用当前exercise_type
-        }
-        
+        let _inferred_type = self.inference_engine.classify_exercise(&features)?;
+        // 注：可以在这里比较inferred_type和exercise_type的一致性
+
         // 姿态分析
         let pose_analysis = self.pose_analyzer.analyze_pose(&features, &exercise_type)?;
-        
+
         // 动作计数
         if let Some(new_rep) = pose_analysis.detected_repetition {
             if new_rep {
@@ -208,7 +215,7 @@ impl EdgeFitEngine {
         // 错误检测
         let current_timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .map_err(|e| format!("System time error: {}", e))?
             .as_millis() as u64;
         let errors = self.detect_form_errors(&pose_analysis, &exercise_type, current_timestamp)?;
 
@@ -303,7 +310,8 @@ impl EdgeFitEngine {
 }
 
 #[pymodule]
-fn rust_engine(_py: Python, m: &PyModule) -> PyResult<()> {
+#[allow(non_local_definitions)]
+fn rust_engine(py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<EdgeFitEngine>()?;
     Ok(())
 }

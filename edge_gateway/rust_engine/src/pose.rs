@@ -1,5 +1,4 @@
 // edge_gateway/rust_engine/src/pose.rs
-use crate::SensorData;
 
 #[derive(Debug, Clone)]
 pub struct PoseAnalysis {
@@ -60,7 +59,7 @@ impl PoseAnalyzer {
         
         // 检测动作阶段
         let (new_phase, rep_detected) = self.detect_squat_phase(smoothed_accel);
-        let old_phase = std::mem::replace(&mut self.movement_state, new_phase);
+        self.movement_state = new_phase;
         
         // 计算形态评分
         let form_score = self.calculate_squat_form_score(knee_flex_estimate, features);

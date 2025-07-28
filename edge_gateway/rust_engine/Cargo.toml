@@ -12,8 +12,8 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # Python绑定
-pyo3 = { version = "0.20", optional = true, features = ["extension-module", "abi3-py38"] }
-pythonize = "0.20"
+pyo3 = { version = "0.22.0", optional = true, features = ["extension-module", "abi3-py38", "multiple-pymethods"] }
+pythonize = "0.22.0"
 
 # 序列化
 serde = { version = "1.0", features = ["derive"] }
