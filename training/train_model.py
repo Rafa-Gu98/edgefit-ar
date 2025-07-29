@@ -1,4 +1,3 @@
-# training/train_model.py
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -11,6 +10,7 @@ from typing import Dict, List, Tuple, Optional
 from sklearn.metrics import classification_report, confusion_matrix
 import matplotlib.pyplot as plt
 import seaborn as sns
+from torch.amp import autocast, GradScaler
 
 logger = logging.getLogger(__name__)
 
@@ -100,8 +100,12 @@ class ModelTrainer:
         features = np.load(data_path / "features.npy")
         labels = np.load(data_path / "labels.npy")
         
-        logger.info(f"加载数据集 {dataset_name}: {features.shape[0]} 样本, {features.shape[1]} 特征")
+        # 验证并修正标签
+        unique_labels = np.unique(labels)
+        label_mapping = {old: new for new, old in enumerate(unique_labels)}
+        labels = np.array([label_mapping[l] for l in labels])
         
+        logger.info(f"加载数据集 {dataset_name}: {features.shape[0]} 样本, {features.shape[1]} 特征")
         return features, labels
     
     def prepare_data_loaders(self, features: np.ndarray, labels: np.ndarray, 
@@ -142,6 +146,7 @@ class ModelTrainer:
         criterion = nn.CrossEntropyLoss()
         optimizer = optim.Adam(model.parameters(), lr=0.001)
         scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs)
+        scaler = GradScaler(enabled=self.device.type == 'cuda')
         
         # 训练历史
         history = {
@@ -167,10 +172,13 @@ class ModelTrainer:
                 batch_labels = batch_labels.to(self.device)
                 
                 optimizer.zero_grad()
-                outputs = model(batch_features)
-                loss = criterion(outputs, batch_labels)
-                loss.backward()
-                optimizer.step()
+                with autocast(device_type=self.device.type):
+                    outputs = model(batch_features)
+                    loss = criterion(outputs, batch_labels)
+                
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
                 
                 train_loss += loss.item()
                 _, predicted = torch.max(outputs.data, 1)
@@ -215,7 +223,8 @@ class ModelTrainer:
             if val_acc > best_val_acc:
                 best_val_acc = val_acc
                 patience_counter = 0
-                # 保存最佳模型
+                # 确保 models 目录存在
+                Path('./models').mkdir(parents=True, exist_ok=True)
                 torch.save(model.state_dict(), './models/best_model.pth')
             else:
                 patience_counter += 1
@@ -272,7 +281,7 @@ class ModelTrainer:
             'true_labels': all_labels
         }
     
-    def plot_training_history(self, history: Dict, save_path: str = "./training_history.png"):
+    def plot_training_history(self, history: Dict, save_path: str = "./models/training_history.png"):
         """绘制训练历史"""
         
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
@@ -298,7 +307,7 @@ class ModelTrainer:
         logger.info(f"训练历史图保存到: {save_path}")
     
     def plot_confusion_matrix(self, cm: np.ndarray, class_names: List[str], 
-                            save_path: str = "./confusion_matrix.png"):
+                            save_path: str = "./models/confusion_matrix.png"):
         """绘制混淆矩阵"""
         
         plt.figure(figsize=(8, 6))
@@ -320,13 +329,16 @@ def main():
     trainer = ModelTrainer()
     
     # 加载合成健身数据集
-    features, labels = trainer.load_dataset('synthetic_fitness')
+    features, labels = trainer.load_dataset('uci_har')
+    logger.info(f"Labels range: min={np.min(labels)}, max={np.max(labels)}")
+    unique_labels = np.unique(labels)
+    logger.info(f"Unique labels: {unique_labels}, Number of classes: {len(unique_labels)}")
     
     # 准备数据加载器
     train_loader, val_loader, test_loader = trainer.prepare_data_loaders(features, labels)
     
     # 创建模型
-    num_classes = len(np.unique(labels))
+    num_classes = len(unique_labels)
     input_dim = features.shape[1]
     
     model = ExerciseClassifier(input_dim=input_dim, num_classes=num_classes)
@@ -340,7 +352,7 @@ def main():
     model.load_state_dict(torch.load('./models/best_model.pth'))
     
     # 评估模型
-    class_names = ['squat', 'pushup', 'plank', 'lunge', 'jumping_jack']
+    class_names = ['WALKING', 'WALKING_UPSTAIRS', 'WALKING_DOWNSTAIRS', 'SITTING', 'STANDING', 'LAYING']
     results = trainer.evaluate_model(model, test_loader, class_names)
     
     logger.info(f"测试准确率: {results['accuracy']:.2f}%")
@@ -351,8 +363,11 @@ def main():
     
     # 转换为TorchScript进行部署
     model.eval()
-    example_input = torch.randn(1, input_dim)
+    device = next(model.parameters()).device
+    example_input = torch.randn(1, input_dim, device=device)
     traced_model = torch.jit.trace(model, example_input)
+    # 确保 models 目录存在
+    Path('./models').mkdir(parents=True, exist_ok=True)
     traced_model.save('./models/exercise_classifier.pt')
     
     logger.info("✓ 模型训练完成并保存为TorchScript格式")

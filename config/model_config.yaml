@@ -78,22 +78,22 @@ optimization:
 training:
   datasets:
     uci_har:
-      path: "./data_engine/datasets/raw/uci_har"
+      path: "./data_engine/datasets/processed/uci_har"
       train_split: 0.7
       val_split: 0.15
       test_split: 0.15
     
-    fit3d:
-      path: "./data_engine/datasets/raw/fit3d"
-      train_split: 0.8
-      val_split: 0.1
-      test_split: 0.1
+    # fit3d:
+    #   path: "./data_engine/datasets/processed/fit3d"
+    #   train_split: 0.8
+    #   val_split: 0.1
+    #   test_split: 0.1
     
-    custom:
-      path: "./data_engine/datasets/raw/custom"
-      train_split: 0.7
-      val_split: 0.15
-      test_split: 0.15
+    # custom:
+    #   path: "./data_engine/datasets/processed/custom"
+    #   train_split: 0.7
+    #   val_split: 0.15
+    #   test_split: 0.15
   
   hyperparameters:
     batch_size: 32

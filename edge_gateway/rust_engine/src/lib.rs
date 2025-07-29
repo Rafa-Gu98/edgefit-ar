@@ -72,44 +72,36 @@ impl EdgeFitEngine {
         })
     }
 
-    pub fn process_sensor_data(&mut self, data: &PyList) -> PyResult<PyObject> {
-        Python::with_gil(|py| {
-            // 转换Python数据到Rust结构
-            let sensor_data: Vec<SensorData> = data
-                .iter()
-                .map(|item| {
-                    let item = item?;
-                    let dict = item.downcast::<PyDict>()?;
-                    Ok(SensorData {
-                        timestamp: dict.get_item("timestamp")
-                            .and_then(|v| v.ok())
-                            .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err("Missing 'timestamp'"))?
-                            .extract()?,
-                        accelerometer: dict.get_item("accelerometer")
-                            .and_then(|v| v.ok())
-                            .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err("Missing 'accelerometer'"))?
-                            .extract()?,
-                        gyroscope: dict.get_item("gyroscope")
-                            .and_then(|v| v.ok())
-                            .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err("Missing 'gyroscope'"))?
-                            .extract()?,
-                        magnetometer: dict.get_item("magnetometer")
-                            .and_then(|v| v.ok())
-                            .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err("Missing 'magnetometer'"))?
-                            .extract()?,
-                    })
-                })
-                .collect::<PyResult<Vec<_>>>()?;
+    pub fn process_sensor_data(&mut self, py: Python, data: &Bound<PyList>) -> PyResult<PyObject> {
+        // 转换Python数据到Rust结构
+        let mut sensor_data = Vec::new();
+        
+        for item in data.iter() {
+            let dict = item.downcast::<PyDict>()?;
+            
+            let sensor = SensorData {
+                timestamp: dict.get_item("timestamp")?
+                    .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err("Missing 'timestamp'"))?
+                    .extract()?,
+                accelerometer: dict.get_item("accelerometer")?
+                    .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err("Missing 'accelerometer'"))?
+                    .extract()?,
+                gyroscope: dict.get_item("gyroscope")?
+                    .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err("Missing 'gyroscope'"))?
+                    .extract()?,
+                magnetometer: dict.get_item("magnetometer")?
+                    .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err("Missing 'magnetometer'"))?
+                    .extract()?,
+            };
+            sensor_data.push(sensor);
+        }
 
-            // 执行推理
-            let analysis = self.analyze_movement(&sensor_data)
-                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
+        // 执行推理
+        let analysis = self.analyze_movement(&sensor_data)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
 
-            // 转换结果回Python对象
-            pythonize::pythonize(py, &analysis)
-                .map(|bound| bound.to_object(py))
-                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
-        })
+        // 转换结果回Python对象
+        self.analysis_result_to_pyobject(py, &analysis)
     }
 
     pub fn start_exercise_session(&mut self, exercise_type: String) -> PyResult<()> {
@@ -163,29 +155,59 @@ impl EdgeFitEngine {
         Ok(self.inference_engine.get_model_info())
     }
 
-    pub fn evaluate_model(&self, test_data: &PyList, test_labels: &PyList) -> PyResult<HashMap<String, f32>> {
-        Python::with_gil(|py| {
-            // 转换测试数据
-            let features_batch: Vec<Vec<f32>> = test_data
-                .iter()
-                .map(|item| item?.extract())
-                .collect::<PyResult<Vec<_>>>()?;
+    pub fn evaluate_model(&self, py: Python, test_data: &Bound<PyList>, test_labels: &Bound<PyList>) -> PyResult<HashMap<String, f32>> {
+        // 转换测试数据
+        let mut features_batch = Vec::new();
+        for item in test_data.iter() {
+            let features: Vec<f32> = item.extract()?;
+            features_batch.push(features);
+        }
 
-            let labels: Vec<String> = test_labels
-                .iter()
-                .map(|item| item?.extract())
-                .collect::<PyResult<Vec<_>>>()?;
+        let mut labels = Vec::new();
+        for item in test_labels.iter() {
+            let label: String = item.extract()?;
+            labels.push(label);
+        }
 
-            // 执行评估
-            let metrics = self.inference_engine.evaluate_model(&features_batch, &labels)
-                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
+        // 执行评估
+        let metrics = self.inference_engine.evaluate_model(&features_batch, &labels)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
 
-            Ok(metrics)
-        })
+        Ok(metrics)
     }
 }
 
 impl EdgeFitEngine {
+    // 手动转换AnalysisResult到Python对象
+    fn analysis_result_to_pyobject(&self, py: Python, analysis: &AnalysisResult) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("exercise_type", &analysis.exercise_type)?;
+        dict.set_item("repetitions", analysis.repetitions)?;
+        dict.set_item("form_score", analysis.form_score)?;
+        dict.set_item("calories_burned", analysis.calories_burned)?;
+        
+        // 转换errors
+        let errors_list = PyList::empty_bound(py);
+        for error in &analysis.errors {
+            let error_dict = PyDict::new_bound(py);
+            error_dict.set_item("error_type", &error.error_type)?;
+            error_dict.set_item("severity", &error.severity)?;
+            error_dict.set_item("timestamp", error.timestamp)?;
+            error_dict.set_item("suggestion", &error.suggestion)?;
+            errors_list.append(error_dict)?;
+        }
+        dict.set_item("errors", errors_list)?;
+        
+        // 转换muscle_activation
+        let muscle_dict = PyDict::new_bound(py);
+        for (muscle, activation) in &analysis.muscle_activation {
+            muscle_dict.set_item(muscle, *activation)?;
+        }
+        dict.set_item("muscle_activation", muscle_dict)?;
+        
+        Ok(dict.to_object(py))
+    }
+
     fn analyze_movement(&mut self, sensor_data: &[SensorData]) -> Result<AnalysisResult, String> {
         if self.current_exercise.is_none() {
             return Err("No exercise session started".to_string());
@@ -310,8 +332,7 @@ impl EdgeFitEngine {
 }
 
 #[pymodule]
-#[allow(non_local_definitions)]
-fn rust_engine(py: Python, m: &PyModule) -> PyResult<()> {
+fn rust_engine(m: &Bound<PyModule>) -> PyResult<()> {
     m.add_class::<EdgeFitEngine>()?;
     Ok(())
 }

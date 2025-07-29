@@ -10,7 +10,7 @@ import time
 from datetime import datetime
 import numpy as np
 
-from ..rust_engine import EdgeFitEngine
+from edge_gateway.rust_engine import EdgeFitEngine
 from .model_manager import ModelManager
 from .data_adapter import DataAdapter
 from .connection_manager import ConnectionManager

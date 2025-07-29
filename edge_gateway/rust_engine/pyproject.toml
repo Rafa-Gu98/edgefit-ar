@@ -7,4 +7,4 @@ build-backend = "maturin"
 cargo-options = ["--release"]
 bindings = "pyo3"
 strip = true
-module-name = "edge_gateway.rust_engine"
+module-name = "rust_engine"
