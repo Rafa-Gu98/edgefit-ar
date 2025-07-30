@@ -1,11 +1,11 @@
-# EdgeFit-AR 🥽 Intelligent Glasses Sports Assistance System
+# 🚀 FastAPI + Rust High-Performance Edge Computing
 
 [![Python](https://img.shields.io/badge/Python-3.8+-blue?logo=python)](https://python.org)
 [![Rust](https://img.shields.io/badge/Rust-1.68+-orange?logo=rust)](https://rust-lang.org)
 [![PyTorch](https://img.shields.io/badge/PyTorch-1.13+-EE4C2C?logo=pytorch)](https://pytorch.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.68+-009688?logo=fastapi)](https://fastapi.tiangolo.com)
 
-**Edge Computing: Fusion of Python Ecosystem and Rust Performance for Real-Time Motion Pose Analysis System**, achieving millisecond-level feedback for sports injury prevention on smart glasses.
+**EdgeFit-AR 🥽 Intelligent Glasses Sports Assistance System**, achieving millisecond-level feedback for sports injury prevention on smart glasses.
 
 ## ✨ Project Features
 

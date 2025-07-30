@@ -10,10 +10,11 @@ import time
 from datetime import datetime
 import numpy as np
 
-from edge_gateway.rust_engine import EdgeFitEngine
-from .model_manager import ModelManager
-from .data_adapter import DataAdapter
-from .connection_manager import ConnectionManager
+import rust_engine
+from rust_engine import EdgeFitEngine
+from model_manager import ModelManager
+from data_adapter import DataAdapter
+from connection_manager import ConnectionManager
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -387,3 +388,122 @@ async def websocket_health_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         connection_manager.disconnect_health(websocket)
         logger.info("Health monitoring WebSocket client disconnected")
+
+
+@app.websocket("/ws/ar")
+async def websocket_ar_endpoint(websocket: WebSocket):
+    """AR应用WebSocket端点"""
+    
+    try:
+        # 详细记录连接过程
+        logger.info("尝试建立 WebSocket /ws/ar 连接...")
+        
+        await connection_manager.connect(websocket)
+        logger.info("WebSocket /ws/ar 连接成功建立")
+        
+        while True:
+            try:
+                # 接收来自AR客户端的数据
+                logger.debug("等待接收 WebSocket 数据...")
+                data = await websocket.receive_text()
+                logger.info(f"收到 AR 数据: {data[:100]}...")  # 只显示前100个字符
+                
+                # 解析 JSON 数据
+                try:
+                    ar_data = json.loads(data)
+                    logger.debug(f"成功解析 JSON 数据，类型: {type(ar_data)}")
+                except json.JSONDecodeError as json_err:
+                    logger.error(f"JSON 解析失败: {json_err}")
+                    error_response = {
+                        "type": "error",
+                        "message": "Invalid JSON format",
+                        "timestamp": int(time.time() * 1000)
+                    }
+                    await websocket.send_text(json.dumps(error_response))
+                    continue
+                
+                # 处理AR数据
+                if inference_engine:
+                    logger.debug("推理引擎可用，开始处理数据")
+                    
+                    try:
+                        # 根据数据类型处理
+                        if "sensor_data" in ar_data:
+                            logger.debug("处理传感器数据")
+                            sensor_list = data_adapter.dict_to_sensor_list([ar_data["sensor_data"]])
+                            result = inference_engine.process_sensor_data(sensor_list)
+                            result["timestamp"] = int(time.time() * 1000)
+                            result["type"] = "analysis_result"
+                            
+                            response_text = json.dumps(result)
+                            await websocket.send_text(response_text)
+                            logger.info("成功发送分析结果")
+                        
+                        elif "pose_data" in ar_data:
+                            logger.debug("处理姿态数据")
+                            # 处理姿态数据的逻辑
+                            response = {
+                                "type": "pose_processed",
+                                "status": "success",
+                                "timestamp": int(time.time() * 1000)
+                            }
+                            await websocket.send_text(json.dumps(response))
+                            logger.info("成功处理姿态数据")
+                        
+                        else:
+                            logger.debug("处理其他类型数据")
+                            # 其他类型的AR数据
+                            response = {
+                                "type": "data_received",
+                                "status": "success",
+                                "message": "Data received and processed",
+                                "timestamp": int(time.time() * 1000)
+                            }
+                            await websocket.send_text(json.dumps(response))
+                            logger.info("成功处理通用数据")
+                            
+                    except Exception as process_err:
+                        logger.error(f"数据处理失败: {process_err}", exc_info=True)
+                        error_response = {
+                            "type": "error",
+                            "message": f"Data processing failed: {str(process_err)}",
+                            "timestamp": int(time.time() * 1000)
+                        }
+                        await websocket.send_text(json.dumps(error_response))
+                
+                else:
+                    logger.warning("推理引擎未初始化")
+                    # 推理引擎未初始化
+                    error_response = {
+                        "type": "error",
+                        "message": "Inference engine not initialized",
+                        "timestamp": int(time.time() * 1000)
+                    }
+                    await websocket.send_text(json.dumps(error_response))
+                    
+            except WebSocketDisconnect:
+                logger.info("WebSocket 客户端主动断开连接")
+                break
+                
+            except Exception as msg_err:
+                logger.error(f"处理 WebSocket 消息时出错: {msg_err}", exc_info=True)
+                try:
+                    error_response = {
+                        "type": "error",
+                        "message": f"Message processing error: {str(msg_err)}",
+                        "timestamp": int(time.time() * 1000)
+                    }
+                    await websocket.send_text(json.dumps(error_response))
+                except Exception as send_err:
+                    logger.error(f"发送错误消息失败: {send_err}")
+                    break
+            
+    except Exception as conn_err:
+        logger.error(f"WebSocket 连接过程中出错: {conn_err}", exc_info=True)
+        
+    finally:
+        try:
+            connection_manager.disconnect(websocket)
+            logger.info("WebSocket /ws/ar 连接已清理")
+        except Exception as cleanup_err:
+            logger.error(f"清理 WebSocket 连接时出错: {cleanup_err}")
