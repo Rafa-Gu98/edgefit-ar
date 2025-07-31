@@ -27,36 +27,38 @@
 
 ```
 EdgeFit-AR/
-├── 📊 data_engine/              # Data Processing Core
-│   ├── datasets/                # Dataset Storage
-│   │   ├── raw/                # Raw Data (UCI HAR)
-│   │   ├── processed/          # Processed Data
-│   │   └── simulated/          # Simulated Generated Data
-│   ├── preprocessing.py        # Data Preprocessing
-│   ├── simulator.py           # Sensor Data Simulation
-│   └── setup_datasets.py      # Dataset Configuration
+├── 📊 data_engine/                # Data Processing Core
+│   ├── datasets/                   # Dataset Storage
+│   │   ├── raw/                    # Raw Data (UCI HAR)
+│   │   └── processed/              # Processed Data
+│   ├── preprocessing.py            # Data Preprocessing
+│   └── setup_datasets.py           # Dataset Configuration
 │
-├── ⚡ edge_gateway/             # Edge Computing Gateway
-│   ├── api/                   # FastAPI
-│   ├── rust_engine/           # Rust High-Performance Engine (In Development)
-│   ├── main.py               # Service Entry
-│   ├── model_manager.py      # AI Model Management
-│   └── data_adapter.py       # Data Format Conversion
+├── ⚡ edge_gateway/               # Edge Computing Gateway
+│   ├── api/                        # FastAPI
+│   │   ├── main.py                 # Service Entry
+│   │   ├── model_manager.py        # AI Model Management
+│   │   ├── connection_manager.py   # Conncetion
+│   │   └── data_adapter.py         # Data Format Conversion
+│   └── rust_engine/                # Rust High-Performance Engine 
+│       ├── Cargo.toml              # Rust project configuration
+│       ├── pyproject.toml          # Python build configuration
+│       ├── build.py                # Maturin build
+│       └── src/
+│            ├── lib.rs             # Rust core implementation            
+│            ├── features.rs        # Feature management code
+│            ├── health.py          # Health check functionality
+│            ├── pose.py            # Pose detection logic
+│            └── inference.py       # Inference processing code     
 │
-├── 🥽 ar_interface/            # AR User Interface
-│   ├── web_simulator.py      # Web AR Simulator
-│   └── __init__.py
+├── 🥽 ar_interface/               # AR User Interface
+│   └── web_simulator.py            # Web AR Simulator
 │
-├── 🤖 training/               # AI Model Training
-│   └── train_model.py        # Training Main Script
-│
-├── 🔧 hardware_simulator/     # Hardware Simulator
-│   ├── sensor_emulator.py    # Sensor Data Simulation
-│   ├── ar_simulator.py       # AR Device Simulation
-│   └── data_generator.py     # Data Generation Tool
-│
-├── ⚙️ config/                 # Configuration Files (Auto-Generated)
-└── 📋 requirements.txt        # Python Dependencies
+├── 🤖 training/                   # AI Model Training
+│   └── train_model.py              # Training Main Script
+
+├── ⚙️ config/                     # Configuration Files (Auto-Generated)
+└── 📋 requirements.txt            # Python Dependencies
 ```
 
 ## 🎯 Core Functions
@@ -80,7 +82,7 @@ EdgeFit-AR/
 
 - [x] **v0.1** - Basic data processing and AI training
 - [x] **v0.2** - Web AR interface and real-time inference
-- [ ] **v0.3** - Rust performance optimization engine
+- [x] **v0.3** - Rust performance optimization engine
 - [ ] **v0.4** - Unity 3D AR interface
 - [ ] **v0.5** - Mobile deployment support
 - [ ] **v0.6** - Cloud synchronization and multi-user support

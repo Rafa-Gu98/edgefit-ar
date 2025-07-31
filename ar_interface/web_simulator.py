@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
 """
-EdgeFit-AR Web模拟器
+EdgeFit-AR Web模拟器 - 修复版本
 在没有Unity的情况下提供AR界面功能
 """
 
-from fastapi import FastAPI, WebSocket, Request
+from fastapi import FastAPI, WebSocket, Request, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
 import json
 import asyncio
-import websockets
-from typing import Dict, List
+from typing import List
 from pathlib import Path
 import uvicorn
+import logging
+
+# 配置日志
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="EdgeFit-AR Web Simulator")
 
@@ -30,21 +34,26 @@ templates = Jinja2Templates(directory=templates_path)
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
-        self.edge_gateway_url = "ws://localhost:8000/ws/sensor"
+        self.edge_gateway_url = "ws://localhost:8000/ws/ar"  # 修改为正确的端点
+        self.edge_gateway_connected = False
     
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
+        logger.info(f"AR客户端连接成功，当前连接数: {len(self.active_connections)}")
     
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+        logger.info(f"AR客户端断开连接，当前连接数: {len(self.active_connections)}")
     
     async def send_to_all(self, message: dict):
-        for connection in self.active_connections:
+        for connection in self.active_connections[:]:  # 使用切片避免修改列表时的问题
             try:
                 await connection.send_text(json.dumps(message))
-            except:
-                pass
+            except Exception as e:
+                logger.error(f"发送消息到客户端失败: {e}")
+                self.disconnect(connection)
 
 manager = ConnectionManager()
 
@@ -55,29 +64,204 @@ async def get_ar_interface(request: Request):
 
 @app.websocket("/ws/ar")
 async def websocket_endpoint(websocket: WebSocket):
-    """AR界面WebSocket连接"""
+    """AR界面WebSocket连接 - 直接处理，不转发"""
     await manager.connect(websocket)
+    
     try:
-        # 连接到边缘网关
-        async with websockets.connect(manager.edge_gateway_url) as edge_ws:
-            # 创建双向数据流
-            async def forward_to_edge():
-                async for message in websocket.iter_text():
-                    await edge_ws.send(message)
+        # 发送欢迎消息
+        welcome_msg = {
+            "type": "system",
+            "message": "AR模拟器已连接",
+            "timestamp": int(asyncio.get_event_loop().time() * 1000)
+        }
+        await websocket.send_text(json.dumps(welcome_msg))
+        
+        # 开始模拟传感器数据
+        sensor_task = asyncio.create_task(simulate_sensor_data(websocket))
+        
+        try:
+            while True:
+                # 接收来自AR界面的控制消息
+                data = await websocket.receive_text()
+                logger.info(f"收到AR控制消息: {data}")
+                
+                try:
+                    message = json.loads(data)
+                    await handle_ar_control(websocket, message)
+                except json.JSONDecodeError:
+                    logger.error(f"无效的JSON数据: {data}")
+                    
+        except WebSocketDisconnect:
+            logger.info("AR客户端主动断开连接")
+        finally:
+            sensor_task.cancel()
             
-            async def forward_from_edge():
-                async for message in edge_ws:
-                    await websocket.send_text(message)
-            
-            # 并行处理双向通信
-            await asyncio.gather(
-                forward_to_edge(),
-                forward_from_edge()
-            )
     except Exception as e:
-        print(f"WebSocket连接错误: {e}")
+        logger.error(f"WebSocket连接错误: {e}", exc_info=True)
     finally:
         manager.disconnect(websocket)
+
+async def simulate_sensor_data(websocket: WebSocket):
+    """模拟传感器数据"""
+    import random
+    import math
+    
+    time_step = 0
+    exercise_state = "idle"  # idle, active, rep_detected
+    rep_count = 0
+    
+    try:
+        while True:
+            time_step += 1
+            
+            # 模拟深蹲动作的传感器数据
+            if exercise_state == "active":
+                # 模拟深蹲动作的周期性变化
+                cycle = math.sin(time_step * 0.1) 
+                
+                accel_data = [
+                    random.uniform(-2, 2) + cycle * 3,  # X轴 - 前后倾斜
+                    random.uniform(-1, 1) - abs(cycle) * 8,  # Y轴 - 上下运动
+                    random.uniform(-1, 1) + cycle * 1   # Z轴 - 左右摆动
+                ]
+                
+                gyro_data = [
+                    random.uniform(-50, 50) + cycle * 30,  # 绕X轴旋转
+                    random.uniform(-20, 20),               # 绕Y轴旋转  
+                    random.uniform(-30, 30) + cycle * 20   # 绕Z轴旋转
+                ]
+                
+                # 检测是否完成一次深蹲
+                if abs(cycle) > 0.95 and exercise_state == "active":
+                    rep_count += 1
+                    exercise_state = "rep_detected"
+                    
+                    # 发送重复次数检测结果
+                    rep_msg = {
+                        "type": "analysis_result",
+                        "result": {
+                            "rep_detected": True,
+                            "feedback": f"完成第{rep_count}次深蹲！",
+                            "quality": "good",
+                            "rep_count": rep_count
+                        },
+                        "timestamp": int(asyncio.get_event_loop().time() * 1000)
+                    }
+                    await websocket.send_text(json.dumps(rep_msg))
+                    
+                    # 1秒后恢复到active状态
+                    await asyncio.sleep(1)
+                    exercise_state = "active"
+                    
+            else:
+                # 静止状态的传感器数据
+                accel_data = [
+                    random.uniform(-0.5, 0.5),
+                    random.uniform(-0.5, 0.5) - 9.8,  # 重力加速度
+                    random.uniform(-0.5, 0.5)
+                ]
+                
+                gyro_data = [
+                    random.uniform(-5, 5),
+                    random.uniform(-5, 5),
+                    random.uniform(-5, 5)
+                ]
+            
+            # 发送传感器数据
+            sensor_msg = {
+                "type": "sensor_data",
+                "data": {
+                    "accel": accel_data,
+                    "gyro": gyro_data,
+                    "timestamp": int(asyncio.get_event_loop().time() * 1000)
+                }
+            }
+            await websocket.send_text(json.dumps(sensor_msg))
+            
+            # 发送姿态分析结果（每3秒一次）
+            if time_step % 30 == 0:
+                if exercise_state == "active":
+                    feedback_messages = [
+                        "保持膝盖与脚尖同向",
+                        "下蹲深度很好",
+                        "注意保持背部挺直",
+                        "动作节奏很棒",
+                        "继续保持"
+                    ]
+                    feedback = random.choice(feedback_messages)
+                    quality = random.choice(["good", "excellent"])
+                else:
+                    feedback = "准备开始运动"
+                    quality = "normal"
+                
+                analysis_msg = {
+                    "type": "analysis_result", 
+                    "result": {
+                        "feedback": feedback,
+                        "quality": quality,
+                        "rep_detected": False
+                    },
+                    "timestamp": int(asyncio.get_event_loop().time() * 1000)
+                }
+                await websocket.send_text(json.dumps(analysis_msg))
+            
+            await asyncio.sleep(0.1)  # 10Hz更新频率
+            
+    except asyncio.CancelledError:
+        logger.info("传感器数据模拟已停止")
+    except Exception as e:
+        logger.error(f"传感器数据模拟错误: {e}")
+
+async def handle_ar_control(websocket: WebSocket, message: dict):
+    """处理来自AR界面的控制消息"""
+    global exercise_state, rep_count
+    
+    if message.get("type") == "control":
+        action = message.get("action")
+        
+        if action == "start_exercise":
+            exercise_state = "active"
+            response = {
+                "type": "exercise_update",
+                "exercise": {
+                    "name": "深蹲",
+                    "status": "进行中"
+                },
+                "timestamp": int(asyncio.get_event_loop().time() * 1000)
+            }
+            await websocket.send_text(json.dumps(response))
+            logger.info("开始运动模拟")
+            
+        elif action == "pause_exercise":
+            exercise_state = "idle"
+            response = {
+                "type": "exercise_update", 
+                "exercise": {
+                    "name": "深蹲",
+                    "status": "已暂停"
+                },
+                "timestamp": int(asyncio.get_event_loop().time() * 1000)
+            }
+            await websocket.send_text(json.dumps(response))
+            logger.info("暂停运动模拟")
+            
+        elif action == "reset_exercise":
+            exercise_state = "idle"
+            rep_count = 0
+            response = {
+                "type": "exercise_update",
+                "exercise": {
+                    "name": "深蹲", 
+                    "status": "已重置"
+                },
+                "timestamp": int(asyncio.get_event_loop().time() * 1000)
+            }
+            await websocket.send_text(json.dumps(response))
+            logger.info("重置运动模拟")
+
+# 全局变量
+exercise_state = "idle"
+rep_count = 0
 
 def create_ar_template():
     """创建AR界面HTML模板"""
@@ -218,10 +402,26 @@ def create_ar_template():
             color: white;
             cursor: pointer;
             transition: all 0.3s;
+            border: none;
         }
         
         .control-btn:hover {
             background: rgba(255, 255, 255, 0.3);
+        }
+        
+        .log-area {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            width: 300px;
+            height: 150px;
+            background: rgba(0, 0, 0, 0.8);
+            border-radius: 10px;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 12px;
+            overflow-y: auto;
+            border: 1px solid rgba(255, 255, 255, 0.3);
         }
     </style>
 </head>
@@ -261,6 +461,10 @@ def create_ar_template():
             <button class="control-btn" onclick="pauseExercise()">暂停</button>
             <button class="control-btn" onclick="resetExercise()">重置</button>
         </div>
+        
+        <div class="log-area" id="logArea">
+            <div>系统日志:</div>
+        </div>
     </div>
 
     <script>
@@ -269,15 +473,26 @@ def create_ar_template():
         let currentExercise = 'squat';
         let repCount = 0;
         
+        // 添加日志函数
+        function addLog(message) {
+            const logArea = document.getElementById('logArea');
+            const timestamp = new Date().toLocaleTimeString();
+            logArea.innerHTML += `<div>[${timestamp}] ${message}</div>`;
+            logArea.scrollTop = logArea.scrollHeight;
+        }
+        
         // 连接WebSocket
         function connectWebSocket() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const wsUrl = `${protocol}//${window.location.host}/ws/ar`;
             
+            addLog(`尝试连接: ${wsUrl}`);
+            
             ws = new WebSocket(wsUrl);
             
             ws.onopen = function(event) {
                 console.log('WebSocket连接已建立');
+                addLog('WebSocket连接成功');
                 isConnected = true;
                 updateConnectionStatus(true);
                 updatePostureFeedback('系统已连接', 'success');
@@ -290,16 +505,21 @@ def create_ar_template():
             
             ws.onclose = function(event) {
                 console.log('WebSocket连接已关闭');
+                addLog(`连接已关闭 (code: ${event.code})`);
                 isConnected = false;
                 updateConnectionStatus(false);
                 updatePostureFeedback('连接已断开', 'error');
                 
                 // 5秒后重连
-                setTimeout(connectWebSocket, 5000);
+                setTimeout(() => {
+                    addLog('尝试重新连接...');
+                    connectWebSocket();
+                }, 5000);
             };
             
             ws.onerror = function(error) {
                 console.error('WebSocket错误:', error);
+                addLog(`连接错误: ${error.message || '未知错误'}`);
                 updatePostureFeedback('连接错误', 'error');
             };
         }
@@ -312,6 +532,8 @@ def create_ar_template():
                 updatePostureAnalysis(data.result);
             } else if (data.type === 'exercise_update') {
                 updateExerciseInfo(data.exercise);
+            } else if (data.type === 'system') {
+                addLog(`系统: ${data.message}`);
             }
         }
         
@@ -338,8 +560,9 @@ def create_ar_template():
             updatePostureFeedback(feedback, quality);
             
             if (result.rep_detected) {
-                repCount++;
+                repCount = result.rep_count || repCount + 1;
                 document.getElementById('repCount').textContent = repCount;
+                addLog(`检测到重复动作: ${repCount}`);
             }
         }
         
@@ -347,6 +570,7 @@ def create_ar_template():
         function updateExerciseInfo(exercise) {
             document.getElementById('exerciseType').textContent = exercise.name || '未知';
             document.getElementById('exerciseStatus').textContent = exercise.status || '未知';
+            addLog(`运动状态: ${exercise.status}`);
         }
         
         // 更新姿态反馈
@@ -380,22 +604,30 @@ def create_ar_template():
         // 控制函数
         function startExercise() {
             if (ws && isConnected) {
-                ws.send(JSON.stringify({
+                const msg = {
                     type: 'control',
                     action: 'start_exercise',
                     exercise: currentExercise
-                }));
+                };
+                ws.send(JSON.stringify(msg));
+                addLog('发送开始运动指令');
                 updatePostureFeedback('开始运动！', 'success');
+            } else {
+                addLog('未连接，无法开始运动');
             }
         }
         
         function pauseExercise() {
             if (ws && isConnected) {
-                ws.send(JSON.stringify({
+                const msg = {
                     type: 'control',
                     action: 'pause_exercise'
-                }));
+                };
+                ws.send(JSON.stringify(msg));
+                addLog('发送暂停指令');
                 updatePostureFeedback('运动已暂停', 'warning');
+            } else {
+                addLog('未连接，无法暂停运动');
             }
         }
         
@@ -403,16 +635,21 @@ def create_ar_template():
             repCount = 0;
             document.getElementById('repCount').textContent = repCount;
             if (ws && isConnected) {
-                ws.send(JSON.stringify({
+                const msg = {
                     type: 'control',
                     action: 'reset_exercise'
-                }));
+                };
+                ws.send(JSON.stringify(msg));
+                addLog('发送重置指令');
                 updatePostureFeedback('已重置', 'success');
+            } else {
+                addLog('未连接，仅本地重置');
             }
         }
         
         // 页面加载完成后连接WebSocket
         window.onload = function() {
+            addLog('页面加载完成，初始化连接...');
             connectWebSocket();
         };
     </script>
@@ -431,5 +668,6 @@ if __name__ == "__main__":
     create_ar_template()
     
     print("🚀 启动EdgeFit-AR Web模拟器...")
-    print("📱 访问: http://localhost:8001")
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    print("📱 访问: http://localhost:8002")
+    print("📡 不再依赖边缘网关，使用内置传感器模拟")
+    uvicorn.run(app, host="0.0.0.0", port=8002)

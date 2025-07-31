@@ -135,10 +135,26 @@
             color: white;
             cursor: pointer;
             transition: all 0.3s;
+            border: none;
         }
         
         .control-btn:hover {
             background: rgba(255, 255, 255, 0.3);
+        }
+        
+        .log-area {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            width: 300px;
+            height: 150px;
+            background: rgba(0, 0, 0, 0.8);
+            border-radius: 10px;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 12px;
+            overflow-y: auto;
+            border: 1px solid rgba(255, 255, 255, 0.3);
         }
     </style>
 </head>
@@ -178,6 +194,10 @@
             <button class="control-btn" onclick="pauseExercise()">暂停</button>
             <button class="control-btn" onclick="resetExercise()">重置</button>
         </div>
+        
+        <div class="log-area" id="logArea">
+            <div>系统日志:</div>
+        </div>
     </div>
 
     <script>
@@ -186,15 +206,26 @@
         let currentExercise = 'squat';
         let repCount = 0;
         
+        // 添加日志函数
+        function addLog(message) {
+            const logArea = document.getElementById('logArea');
+            const timestamp = new Date().toLocaleTimeString();
+            logArea.innerHTML += `<div>[${timestamp}] ${message}</div>`;
+            logArea.scrollTop = logArea.scrollHeight;
+        }
+        
         // 连接WebSocket
         function connectWebSocket() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const wsUrl = `${protocol}//${window.location.host}/ws/ar`;
             
+            addLog(`尝试连接: ${wsUrl}`);
+            
             ws = new WebSocket(wsUrl);
             
             ws.onopen = function(event) {
                 console.log('WebSocket连接已建立');
+                addLog('WebSocket连接成功');
                 isConnected = true;
                 updateConnectionStatus(true);
                 updatePostureFeedback('系统已连接', 'success');
@@ -207,16 +238,21 @@
             
             ws.onclose = function(event) {
                 console.log('WebSocket连接已关闭');
+                addLog(`连接已关闭 (code: ${event.code})`);
                 isConnected = false;
                 updateConnectionStatus(false);
                 updatePostureFeedback('连接已断开', 'error');
                 
                 // 5秒后重连
-                setTimeout(connectWebSocket, 5000);
+                setTimeout(() => {
+                    addLog('尝试重新连接...');
+                    connectWebSocket();
+                }, 5000);
             };
             
             ws.onerror = function(error) {
                 console.error('WebSocket错误:', error);
+                addLog(`连接错误: ${error.message || '未知错误'}`);
                 updatePostureFeedback('连接错误', 'error');
             };
         }
@@ -229,6 +265,8 @@
                 updatePostureAnalysis(data.result);
             } else if (data.type === 'exercise_update') {
                 updateExerciseInfo(data.exercise);
+            } else if (data.type === 'system') {
+                addLog(`系统: ${data.message}`);
             }
         }
         
@@ -255,8 +293,9 @@
             updatePostureFeedback(feedback, quality);
             
             if (result.rep_detected) {
-                repCount++;
+                repCount = result.rep_count || repCount + 1;
                 document.getElementById('repCount').textContent = repCount;
+                addLog(`检测到重复动作: ${repCount}`);
             }
         }
         
@@ -264,6 +303,7 @@
         function updateExerciseInfo(exercise) {
             document.getElementById('exerciseType').textContent = exercise.name || '未知';
             document.getElementById('exerciseStatus').textContent = exercise.status || '未知';
+            addLog(`运动状态: ${exercise.status}`);
         }
         
         // 更新姿态反馈
@@ -297,22 +337,30 @@
         // 控制函数
         function startExercise() {
             if (ws && isConnected) {
-                ws.send(JSON.stringify({
+                const msg = {
                     type: 'control',
                     action: 'start_exercise',
                     exercise: currentExercise
-                }));
+                };
+                ws.send(JSON.stringify(msg));
+                addLog('发送开始运动指令');
                 updatePostureFeedback('开始运动！', 'success');
+            } else {
+                addLog('未连接，无法开始运动');
             }
         }
         
         function pauseExercise() {
             if (ws && isConnected) {
-                ws.send(JSON.stringify({
+                const msg = {
                     type: 'control',
                     action: 'pause_exercise'
-                }));
+                };
+                ws.send(JSON.stringify(msg));
+                addLog('发送暂停指令');
                 updatePostureFeedback('运动已暂停', 'warning');
+            } else {
+                addLog('未连接，无法暂停运动');
             }
         }
         
@@ -320,16 +368,21 @@
             repCount = 0;
             document.getElementById('repCount').textContent = repCount;
             if (ws && isConnected) {
-                ws.send(JSON.stringify({
+                const msg = {
                     type: 'control',
                     action: 'reset_exercise'
-                }));
+                };
+                ws.send(JSON.stringify(msg));
+                addLog('发送重置指令');
                 updatePostureFeedback('已重置', 'success');
+            } else {
+                addLog('未连接，仅本地重置');
             }
         }
         
         // 页面加载完成后连接WebSocket
         window.onload = function() {
+            addLog('页面加载完成，初始化连接...');
             connectWebSocket();
         };
     </script>

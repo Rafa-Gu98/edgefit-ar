@@ -8,7 +8,6 @@ import json
 import logging
 import time
 from datetime import datetime
-import numpy as np
 
 import rust_engine
 from rust_engine import EdgeFitEngine
